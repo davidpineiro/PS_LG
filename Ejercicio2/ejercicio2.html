@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="ISO-8859-1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+<title>Ejercicio 2</title>
+<script src="js/jquery.min-3.3.1.js"></script>
+<script src="js/highcharts.js"></script>
+<script src="js/modules/exporting.js"></script>
+<script src="js/modules/export-data.js"></script>
+</head>
+<body>
+
+	<div id="linechart" width="300" height="150"></div>
+	<div id="piechart" width="300" height="150"></div>
+
+	<script>
+		var sources = [ {
+			"src" : "data/data1.json",
+			"formatter" : formatData1
+		}, {
+			"src" : "data/data2.json",
+			"formatter" : formatData2
+		}, {
+			"src" : "data/data3.json",
+			"formatter" : formatData3
+		} ];
+
+		var dataStructure = {
+			dateHash : {},
+			categories : []
+		};
+
+		$(document).ready(requestDataSources());
+
+		function requestDataSources () {
+			var promises = [];
+			
+			sources.forEach(function(source) {
+				promises.push($.get(source.src, function(data, status) {
+					if (status == "success") {
+						processData(data, source.formatter);
+					} else {
+						console.error("Error [" + status
+								+ "] retrieving [" + source.src + "]");
+					}
+				}));
+			});
+			
+			// When all the dataSources has been processed we can show the charts
+			$.when.apply($, promises).then(function() {
+				createCharts();
+			});
+		}
+		
+		function processData(data, formatter) {
+			// Fills the dataStructure structure following (*not every date must have every category*)
+			//	{
+			//	 dateHash: {		
+			//	 	date: {
+			//			 	category 1 : value,
+			//		 		...
+			//			 	category N : value
+			//		 },
+			//		 .....		
+			//		}
+			//	categories: [category 1, ..... category N]
+			//	}
+			jQuery.each(data, function(i, row) {
+				item = {};
+				if (formatter != null) {
+					item = formatter(row);
+				} else {
+					item = row;
+				}
+
+				dateItem = dataStructure.dateHash[item.date];
+				if (dateItem == null) {
+					dataStructure.dateHash[item.date] = {};
+					dataStructure.dateHash[item.date][item.category] = item.value;
+				} else {
+					categoryItem = dateItem[item.category];
+					if (categoryItem == null) {
+						dateItem[item.category] = item.value;
+					} else {
+						dateItem[item.category] = categoryItem + item.value;
+					}
+				}
+				if (dataStructure.categories.indexOf(item.category) < 0) {
+					dataStructure.categories.push(item.category);
+				}
+			});
+		}
+
+		function formatChartData() {
+			var dataSource = {
+				labels : [],
+				datasets : []
+			};
+			// Format the values for each category to be used later in the chart
+			jQuery.each(Object.keys(dataStructure.dateHash).sort(), function(i,
+					date) {
+				dataSource.labels.push(date);
+				// get the category dataset
+				jQuery.each(dataStructure.categories.sort(), function(i,
+						category) {
+					position = dataSource.datasets.map(function(set) { return set.name; }).indexOf(category);
+					if (position < 0) {
+						categorySet = {
+								name : category,
+								data : []
+							};
+					} else {
+						categorySet = dataSource.datasets[position]; 
+					}
+					
+					value = dataStructure.dateHash[date][category];
+					categorySet.data.push(value != null ? value: 0);
+					
+					if (position < 0) {
+						dataSource.datasets.push(categorySet);	
+					} 				
+				});
+			});
+
+			return dataSource;
+		}
+
+		function createCharts() {
+			dataSource = formatChartData();
+
+			createLineChart(dataSource);
+			createPieChart(getAccumulate(dataSource));
+		}
+
+		function createLineChart(dataSource) {
+			$('#linechart').highcharts({
+				chart : {
+					type : 'line'
+				},
+				title : {
+					text : 'Test'
+				},
+				xAxis : {
+					categories : dataSource.labels
+				},
+				series : dataSource.datasets
+			});
+		}
+
+		function createPieChart(data) {
+			$('#piechart').highcharts({
+				chart : {
+					type : 'pie'
+				},
+				title : {
+					text : 'Test'
+				},
+			    plotOptions: {
+			        pie: {
+			            allowPointSelect: true,
+			            cursor: 'pointer',
+			            dataLabels: {
+			                enabled: true,
+			                format: '<b>{point.name}</b>: {point.percentage:.1f} %',
+			            }
+			        }
+			    },
+				series : [ {
+					name : 'Categories',
+					data : data
+				} ]
+			});
+		}
+
+		function formatData1(data) {
+			item = {};
+			item["date"] = getTimeStampAsString(data.d);
+			item["category"] = data.cat.toUpperCase();
+			item["value"] = data.value;
+
+			return item;
+		}
+
+		function formatData2(data) {
+			item = {};
+			item["date"] = data.myDate;
+			item["category"] = data.categ.toUpperCase();
+			item["value"] = data.val;
+
+			return item;
+		}
+
+		function formatData3(data) {
+			regexp_date = "(\\d){4}-(\\d){2}-(\\d){2}";
+			// regexp_category = "(?<=\#).*(?=\#)";  LOOKBEHIND ONLY SUPPORTED IN CHROME
+			regexp_category = "(\#).*(?=\#)";
+
+			date = data.raw.match(regexp_date);			
+			category = "";
+			categoryArray = data.raw.match(regexp_category);
+			// Due to limitations with lookbehind we must remove the first character
+			if (categoryArray != null && categoryArray[0].length > 0) {
+				category = categoryArray[0].substring(1, categoryArray[0].length).toUpperCase();	
+			} 
+			item = {};
+			item["date"] = date != null ? date[0] : "";
+			item["category"] = category;
+			item["value"] = data.val;
+
+			return item;
+		}
+
+		function getTimeStampAsString(timestamp) {
+			date = new Date(timestamp);
+			year = date.getFullYear();
+			month = date.getMonth() + 1;
+			month = month < 10 ? "0" + month : month;
+			day = date.getDate();
+			day = day < 10 ? "0" + day : day;
+			return year + "-" + month + "-" + day;
+		}
+
+		function getAccumulate(dataSource) {
+			data = [];
+
+			dataSource.datasets.forEach(function(category) {
+				item = {
+					name : category.name,
+					y : category.data.reduce(function(acc, val) {
+						return acc + val;
+					})
+				}
+				data.push(item);
+			});
+
+			if (data.length > 0) {
+				data[0].sliced = true;
+				data[0].selected = true;
+			}
+
+			return data;
+		}
+	</script>
+</body>
+</html>
